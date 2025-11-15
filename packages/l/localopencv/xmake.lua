@@ -109,16 +109,26 @@ package("localopencv")
         end
     end)
 
-on_fetch("windows", function (package)
-    local windowsdir = path.join(os.scriptdir(), package:plat())
-    local libdir = path.join(windowsdir, "opencv", "build", "x64", "vc16", "lib")
-    local includedir = path.join(windowsdir, "opencv", "build", "include")
-    local result = {}
-    result.links = { "opencv_world4120", "opencv_world4120d" }
-    result.linkdirs = { libdir }
-    result.includedirs = { includedir }
-    return result
-end)
+    on_fetch("windows", function (package)
+        local windowsdir = path.join(os.scriptdir(), package:plat())
+        local libdir = path.join(windowsdir, "opencv", "build", "x64", "vc16", "lib")
+        local includedir = path.join(windowsdir, "opencv", "build", "include")
+
+        -- 检查关键文件是否存在
+        local marker = path.join(windowsdir, "opencv", "build", "include", "opencv2", "opencv.hpp")
+        local libfile = path.join(libdir, "opencv_world4120.lib")
+        
+        if not os.isfile(marker) or not os.isfile(libfile) then
+        -- 如果关键文件不存在，返回nil让xmake执行on_install
+            return nil
+        end
+        
+        local result = {}
+        result.links = { "opencv_world4120", "opencv_world4120d" }
+        result.linkdirs = { libdir }
+        result.includedirs = { includedir }
+        return result
+    end)
     
     on_install("android", "linux", "macosx", function (package)
         io.replace("cmake/OpenCVUtils.cmake", "if(PKG_CONFIG_FOUND OR PkgConfig_FOUND)", "if(NOT WIN32 AND (PKG_CONFIG_FOUND OR PkgConfig_FOUND))", {plain = true})
