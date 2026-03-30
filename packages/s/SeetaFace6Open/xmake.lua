@@ -1,4 +1,4 @@
-package("SeetaFace6Open")
+package("seetaface6open")
     set_homepage("https://github.com/SeetaFace6Open/index")
     set_description("SeetaFace6Open built from upstream source")
     set_license("BSD-2-Clause")
@@ -23,14 +23,27 @@ package("SeetaFace6Open")
         return package:is_arch("x86", "i386") and "x86" or "x64"
     end
 
+    local function _normalize_binpath(bin)
+        if not bin then
+            return nil
+        end
+        if os.isfile(bin) then
+            return path.unix(bin)
+        end
+        if is_host("windows") and os.isfile(bin .. ".exe") then
+            return path.unix(bin .. ".exe")
+        end
+        return path.unix(bin)
+    end
+
     local function _build_configs(package)
         local buildtype = package:is_debug() and "Debug" or "Release"
         local platform = package:is_arch("x86", "i386") and "x86" or "x64"
         local installdir = package:installdir()
         local cmake_installdir = path.unix(installdir)
-        local cc = package:build_getenv("cc")
-        local cxx = package:build_getenv("cxx")
-        return buildtype, platform, installdir, {
+        local cc = _normalize_binpath(package:build_getenv("cc"))
+        local cxx = _normalize_binpath(package:build_getenv("cxx"))
+        local configs = {
             CMAKE_BUILD_TYPE = buildtype,
             CONFIGURATION = buildtype,
             PLATFORM = platform,
@@ -39,9 +52,13 @@ package("SeetaFace6Open")
             CMAKE_INSTALL_PREFIX = cmake_installdir,
             CMAKE_PREFIX_PATH = cmake_installdir,
             CMAKE_MODULE_PATH = path.unix(path.join(installdir, "cmake")),
-            CMAKE_C_COMPILER = cc and path.unix(cc) or nil,
-            CMAKE_CXX_COMPILER = cxx and path.unix(cxx) or nil
+            CMAKE_C_COMPILER = cc,
+            CMAKE_CXX_COMPILER = cxx
         }
+        if package:is_plat("mingw") then
+            configs.CMAKE_CXX_FLAGS = "-Dlocaltime_r(a,b)=localtime_s(b,a)"
+        end
+        return buildtype, platform, installdir, configs
     end
 
     local function _msvc_cmake_generators()
@@ -51,6 +68,16 @@ package("SeetaFace6Open")
             "Visual Studio 16 2019",
             "Visual Studio 15 2017"
         }
+    end
+
+    local function _find_mingw_make(package)
+        local mingw = package:build_getenv("mingw") or package:build_getenv("sdk")
+        if mingw then
+            local make = path.join(mingw, "bin", "mingw32-make.exe")
+            if os.isfile(make) then
+                return path.unix(make)
+            end
+        end
     end
 
     on_load(function (package)
@@ -75,6 +102,83 @@ package("SeetaFace6Open")
                 if content and not content:find("#include <functional>", 1, true) then
                     content = content:gsub("#include <memory>", "#include <memory>\n#include <functional>", 1)
                     io.writefile(pot_h, content)
+                end
+            end
+
+            for _, format_cpp in ipairs(os.files(path.join(srcdir, "OpenRoleZoo", "**", "format.cpp"))) do
+                local content = io.readfile(format_cpp)
+                if content and content:find("localtime_r%(") and not content:find("localtime_s%(") then
+                    content = content:gsub(
+                        "localtime_r%s*%(%s*&from%s*,%s*&to%s*%);",
+                        "#if defined(_WIN32)\n        localtime_s(&to, &from);\n#else\n        localtime_r(&from, &to);\n#endif",
+                        1
+                    )
+                    io.writefile(format_cpp, content)
+                    break
+                end
+            end
+
+            for _, except_h in ipairs(os.files(path.join(srcdir, "OpenRoleZoo", "**", "except.h"))) do
+                local content = io.readfile(except_h)
+                if content and content:find("Exception%(const std::string &message%);") then
+                    content = content:gsub(
+                        "Exception%(const std::string &message%);",
+                        "explicit Exception(const std::string &message) : m_message(message) {}",
+                        1
+                    )
+                    content = content:gsub(
+                        "virtual const char %*what%(%) const ORZ_NOEXCEPT override;",
+                        "virtual const char *what() const ORZ_NOEXCEPT override { return m_message.c_str(); }",
+                        1
+                    )
+                    io.writefile(except_h, content)
+                    break
+                end
+            end
+
+            for _, except_cpp in ipairs(os.files(path.join(srcdir, "OpenRoleZoo", "**", "except.cpp"))) do
+                local content = io.readfile(except_cpp)
+                if content and content:find("Exception::Exception") then
+                    io.writefile(except_cpp, '#include "orz/utils/except.h"\n')
+                    break
+                end
+            end
+
+            for _, importor_cpp in ipairs(os.files(path.join(srcdir, "TenniS", "**", "importor.cpp"))) do
+                local content = io.readfile(importor_cpp)
+                if content and content:find("return%s+GET_FUC_ADDRESS%(") and not content:find("reinterpret_cast<void %*>%s*%(%s*GET_FUC_ADDRESS%(") then
+                    content = content:gsub(
+                        "return%s+GET_FUC_ADDRESS%s*%((.-)%)%s*;",
+                        "return reinterpret_cast<void *>(GET_FUC_ADDRESS(%1));",
+                        1
+                    )
+                    io.writefile(importor_cpp, content)
+                    break
+                end
+            end
+
+            for _, cpu_info_cpp in ipairs(os.files(path.join(srcdir, "TenniS", "**", "cpu_info.cpp"))) do
+                local content = io.readfile(cpu_info_cpp)
+                if content and content:find("#if TS_PLATFORM_OS_WINDOWS") and not content:find("#if TS_PLATFORM_OS_WINDOWS && !TS_PLATFORM_CC_MINGW", 1, true) then
+                    content = content:gsub(
+                        "#if TS_PLATFORM_OS_WINDOWS",
+                        "#if TS_PLATFORM_OS_WINDOWS && !TS_PLATFORM_CC_MINGW"
+                    )
+                    io.writefile(cpu_info_cpp, content)
+                    break
+                end
+            end
+
+            for _, ctxmgr_lite_cpp in ipairs(os.files(path.join(srcdir, "TenniS", "**", "ctxmgr_lite.cpp"))) do
+                local content = io.readfile(ctxmgr_lite_cpp)
+                if content and content:find("#if TS_PLATFORM_CC_GCC") and not content:find("#if TS_PLATFORM_CC_GCC && !TS_PLATFORM_CC_MINGW", 1, true) then
+                    content = content:gsub(
+                        "#if TS_PLATFORM_CC_GCC",
+                        "#if TS_PLATFORM_CC_GCC && !TS_PLATFORM_CC_MINGW",
+                        1
+                    )
+                    io.writefile(ctxmgr_lite_cpp, content)
+                    break
                 end
             end
         end
@@ -103,8 +207,11 @@ package("SeetaFace6Open")
                     table.insert(argv, "-A")
                     table.insert(argv, platform == "x86" and "Win32" or "x64")
                 else
+                    local mingw_make = _find_mingw_make(package)
+                    assert(mingw_make, "mingw32-make not found, cannot configure " .. modulename .. " for mingw")
                     table.insert(argv, "-G")
-                    table.insert(argv, "Ninja")
+                    table.insert(argv, "MinGW Makefiles")
+                    table.insert(argv, cmake_define("CMAKE_MAKE_PROGRAM", mingw_make))
                 end
                 for name, value in pairs(configs) do
                     if value then
