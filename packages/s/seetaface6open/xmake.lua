@@ -80,6 +80,14 @@ package("seetaface6open")
         end
     end
 
+    local function _build_jobs()
+        local jobs = os.default_njob and os.default_njob() or 8
+        if not jobs or jobs < 1 then
+            jobs = 8
+        end
+        return jobs
+    end
+
     on_load(function (package)
         package:add("links", table.unpack(_package_links(package)))
     end)
@@ -189,6 +197,7 @@ package("seetaface6open")
         local _, platform, installdir, common = _build_configs(package)
         local cmake_installdir = path.unix(installdir)
         local is_msvc = package:is_plat("windows")
+        local buildjobs = tostring(_build_jobs())
         local function cmake_define(name, value)
             return "-D" .. name .. "=" .. value
         end
@@ -240,7 +249,10 @@ package("seetaface6open")
             else
                 configure()
             end
-            os.vrunv("cmake", {"--build", ".", "--target", "install", "--config", configs.CMAKE_BUILD_TYPE, "-j", "8"}, {curdir = builddir})
+            os.vrunv("cmake", {"--build", ".", "--target", "install", "--config", configs.CMAKE_BUILD_TYPE, "-j", buildjobs}, {
+                curdir = builddir,
+                envs = {CMAKE_BUILD_PARALLEL_LEVEL = buildjobs}
+            })
         end
 
         os.rm(srcdir)
