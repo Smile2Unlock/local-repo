@@ -3,6 +3,10 @@ package("seetaface6open")
     set_description("SeetaFace6Open built from upstream source")
     set_license("BSD-2-Clause")
 
+    if is_plat("linux") then
+        add_deps("openmp")
+    end
+
     local core_links = {
         "SeetaFaceAntiSpoofingX600",
         "SeetaFaceDetector600",
@@ -23,6 +27,20 @@ package("seetaface6open")
         return package:is_arch("x86", "i386") and "x86" or "x64"
     end
 
+    local function _package_libdir(package)
+        if package:is_plat("linux") then
+            return "lib"
+        end
+        return path.join("lib", _package_archdir(package))
+    end
+
+    local function _package_bindir(package)
+        if package:is_plat("linux") then
+            return "bin"
+        end
+        return path.join("bin", _package_archdir(package))
+    end
+
     local function _normalize_binpath(bin)
         if not bin then
             return nil
@@ -34,6 +52,16 @@ package("seetaface6open")
             return path.unix(bin .. ".exe")
         end
         return path.unix(bin)
+    end
+
+    local function _append_flag(current, extra)
+        if not extra or extra == "" then
+            return current
+        end
+        if not current or current == "" then
+            return extra
+        end
+        return current .. " " .. extra
     end
 
     local function _build_configs(package)
@@ -55,6 +83,15 @@ package("seetaface6open")
             CMAKE_C_COMPILER = cc,
             CMAKE_CXX_COMPILER = cxx
         }
+        if package:is_plat("linux") and package:dep("openmp") then
+            local openmp = package:dep("openmp"):fetch()
+            if openmp then
+                configs.CMAKE_C_FLAGS = _append_flag(configs.CMAKE_C_FLAGS, openmp.cflags)
+                configs.CMAKE_CXX_FLAGS = _append_flag(configs.CMAKE_CXX_FLAGS, openmp.cxxflags)
+                configs.CMAKE_EXE_LINKER_FLAGS = _append_flag(configs.CMAKE_EXE_LINKER_FLAGS, openmp.ldflags)
+                configs.CMAKE_SHARED_LINKER_FLAGS = _append_flag(configs.CMAKE_SHARED_LINKER_FLAGS, openmp.shflags)
+            end
+        end
         if package:is_plat("mingw") then
             configs.CMAKE_CXX_FLAGS = "-Dlocaltime_r(a,b)=localtime_s(b,a)"
         end
@@ -93,16 +130,22 @@ package("seetaface6open")
     end)
 
     on_fetch(function (package)
-        local archdir = _package_archdir(package)
         local result = {}
         result.links = _package_links(package)
-        result.linkdirs = package:installdir(path.join("lib", archdir))
+        result.linkdirs = package:installdir(_package_libdir(package))
         result.includedirs = package:installdir("include")
-        result.bindirs = package:installdir(path.join("bin", archdir))
+        result.bindirs = package:installdir(_package_bindir(package))
         return result
     end)
 
-    on_install("windows|x64", "windows|x86", "mingw|x86_64", "mingw|i386", function (package)
+    on_install(
+        "windows|x64",
+        "windows|x86",
+        "mingw|x86_64",
+        "mingw|i386",
+        "linux|x86_64",
+        "linux|i386",
+        function (package)
         local function apply_source_patches(srcdir)
             local pot_h = path.join(srcdir, "OpenRoleZoo", "include", "orz", "mem", "pot.h")
             if os.isfile(pot_h) then
@@ -110,6 +153,33 @@ package("seetaface6open")
                 if content and not content:find("#include <functional>", 1, true) then
                     content = content:gsub("#include <memory>", "#include <memory>\n#include <functional>", 1)
                     io.writefile(pot_h, content)
+                end
+            end
+
+            for _, pot_cpp in ipairs(os.files(path.join(srcdir, "TenniS", "**", "pot.cpp"))) do
+                local content = io.readfile(pot_cpp)
+                if content then
+                    if not content:find("#include <cstdlib>", 1, true) then
+                        local patched, count = content:gsub('(#include%s+"[^"]-pot%.h")', '%1\n#include <cstdlib>', 1)
+                        content = count > 0 and patched or ('#include <cstdlib>\n' .. content)
+                    end
+                    content = content:gsub(
+                        "return%s+std::shared_ptr<void>%(%s*std::malloc%(%s*_size%s*%)%s*,%s*std::free%s*%);",
+                        "return std::shared_ptr<void>(std::malloc(_size), [](void *ptr) { std::free(ptr); });",
+                        1
+                    )
+                    content = content:gsub(
+                        "return%s+std::shared_ptr<void>%(%s*::malloc%(%s*_size%s*%)%s*,%s*::free%s*%);",
+                        "return std::shared_ptr<void>(std::malloc(_size), [](void *ptr) { std::free(ptr); });",
+                        1
+                    )
+                    content = content:gsub(
+                        "return%s+std::shared_ptr<void>%(%s*malloc%(%s*_size%s*%)%s*,%s*free%s*%);",
+                        "return std::shared_ptr<void>(std::malloc(_size), [](void *ptr) { std::free(ptr); });",
+                        1
+                    )
+                    io.writefile(pot_cpp, content)
+                    break
                 end
             end
 
@@ -213,14 +283,18 @@ package("seetaface6open")
                 if generator then
                     table.insert(argv, "-G")
                     table.insert(argv, generator)
-                    table.insert(argv, "-A")
-                    table.insert(argv, platform == "x86" and "Win32" or "x64")
+                    if is_msvc then
+                        table.insert(argv, "-A")
+                        table.insert(argv, platform == "x86" and "Win32" or "x64")
+                    end
                 else
-                    local mingw_make = _find_mingw_make(package)
-                    assert(mingw_make, "mingw32-make not found, cannot configure " .. modulename .. " for mingw")
-                    table.insert(argv, "-G")
-                    table.insert(argv, "MinGW Makefiles")
-                    table.insert(argv, cmake_define("CMAKE_MAKE_PROGRAM", mingw_make))
+                    if package:is_plat("mingw") then
+                        local mingw_make = _find_mingw_make(package)
+                        assert(mingw_make, "mingw32-make not found, cannot configure " .. modulename .. " for mingw")
+                        table.insert(argv, "-G")
+                        table.insert(argv, "MinGW Makefiles")
+                        table.insert(argv, cmake_define("CMAKE_MAKE_PROGRAM", mingw_make))
+                    end
                 end
                 for name, value in pairs(configs) do
                     if value then
@@ -300,7 +374,8 @@ package("seetaface6open")
         }) do
             install_module(modulename, sdk_configs)
         end
-    end)
+        end
+    )
 
     on_test(function (package)
         assert(os.isfile(path.join(package:installdir("include"), "seeta", "FaceRecognizer.h")), "seetaface headers not found")
