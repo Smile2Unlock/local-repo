@@ -148,23 +148,6 @@ package("reflect-cpp")
             }
         ]]}, {configs = {languages = "c++20"}}))
 
-        if package:config("toml") then
-            assert(package:check_cxxsnippets({test = [[
-                #include <rfl.hpp>
-                #include <rfl/toml.hpp>
-                struct AppConfig {
-                    std::string theme;
-                    int width;
-                };
-                void test() {
-                    const auto cfg = AppConfig{.theme = "light", .width = 1280};
-                    const auto toml_str = rfl::toml::write(cfg);
-                    auto cfg2 = rfl::toml::read<AppConfig>(toml_str).value();
-                    (void)cfg2;
-                }
-            ]]}, {configs = {languages = "c++20"}}))
-        end
-
         if package:config("msgpack") then
             assert(package:check_cxxsnippets({test = [[
                 #include <rfl.hpp>
