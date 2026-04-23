@@ -16,21 +16,38 @@ package("papiliocharontis")
     add_deps("cmake")
 
     on_load(function (package)
-        if package:version() and package:version():ge("1.1.0") then
-            package:set("kind", "library", {headeronly = true})
-        end
+        package:add("links", "papilio")
     end)
 
     on_fetch(function (package)
         local result = {}
+        result.links = {"papilio"}
+        result.linkdirs = package:installdir("lib")
+        result.bindirs = package:installdir("bin")
         result.includedirs = package:installdir("include")
         return result
     end)
 
     on_install(function (package)
-        os.cp("include", package:installdir())
+        local configs = {
+            "-DCMAKE_BUILD_TYPE=" .. (package:is_debug() and "Debug" or "Release"),
+            "-Dpapilio_build_lib=ON",
+            "-Dpapilio_build_example=OFF",
+            "-Dpapilio_build_unit_test=OFF",
+            "-Dpapilio_build_module=OFF",
+            "-Dpapilio_build_doc=OFF",
+            "-Dpapilio_all_warnings=OFF",
+            "-DBUILD_SHARED_LIBS=" .. (package:config("shared") and "ON" or "OFF"),
+        }
+        import("package.tools.cmake").install(package, configs)
     end)
 
     on_test(function (package)
+        assert(os.isfile(path.join(package:installdir("lib"), "libpapilio.a"))
+            or os.isfile(path.join(package:installdir("lib"), "papilio.lib"))
+            or os.isfile(path.join(package:installdir("lib"), "libpapilio.so"))
+            or os.isfile(path.join(package:installdir("lib"), "libpapilio.dylib"))
+            or os.isfile(path.join(package:installdir("bin"), "papilio.dll")),
+            "papiliocharontis library artifact not found")
         assert(os.isdir(path.join(package:installdir("include"), "papilio")), "papiliocharontis include directory not found")
     end)
