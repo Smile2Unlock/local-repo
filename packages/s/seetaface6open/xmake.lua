@@ -130,12 +130,40 @@ package("seetaface6open")
     end)
 
     on_fetch(function (package)
-        local result = {}
-        result.links = _package_links(package)
-        result.linkdirs = package:installdir(_package_libdir(package))
-        result.includedirs = package:installdir("include")
-        result.bindirs = package:installdir(_package_bindir(package))
-        return result
+        local includedir = package:installdir("include")
+        local libdir = package:installdir(_package_libdir(package))
+        local bindir = package:installdir(_package_bindir(package))
+        local marker = path.join(includedir, "seeta", "FaceRecognizer.h")
+
+        local has_any_library = false
+        for _, link in ipairs(_package_links(package)) do
+            local candidates = {
+                path.join(libdir, "lib" .. link .. ".a"),
+                path.join(libdir, "lib" .. link .. ".so"),
+                path.join(libdir, "lib" .. link .. ".dylib"),
+                path.join(libdir, link .. ".lib"),
+                path.join(bindir, link .. ".dll")
+            }
+            if os.isfile(candidates[1])
+                or os.isfile(candidates[2])
+                or os.isfile(candidates[3])
+                or os.isfile(candidates[4])
+                or os.isfile(candidates[5]) then
+                has_any_library = true
+                break
+            end
+        end
+
+        if not os.isfile(marker) or not has_any_library then
+            return nil
+        end
+
+        return {
+            links = _package_links(package),
+            linkdirs = {libdir},
+            includedirs = {includedir},
+            bindirs = {bindir}
+        }
     end)
 
     on_install(

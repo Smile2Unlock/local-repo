@@ -140,12 +140,32 @@ package("eui")
     end)
 
     on_fetch(function (package)
-        local result = {}
-        result.links = {"eui_neo_core"}
-        result.linkdirs = package:installdir("lib")
-        result.includedirs = _collect_includedirs(package:installdir())
-        result.bindirs = package:installdir("bin")
-        return result
+        local installdir = package:installdir()
+        local includedir = path.join(installdir, "include")
+        local libdir = path.join(installdir, "lib")
+        local bindir = path.join(installdir, "bin")
+        local marker = path.join(includedir, "eui", "app", "DslAppRuntime.h")
+        local libfile = path.join(libdir, "libeui_neo_core.a")
+        local sharedfile = path.join(libdir, "libeui_neo_core.so")
+        local dylibfile = path.join(libdir, "libeui_neo_core.dylib")
+        local winlibfile = path.join(libdir, "eui_neo_core.lib")
+        local dllfile = path.join(bindir, "eui_neo_core.dll")
+
+        if not os.isfile(marker)
+            or (not os.isfile(libfile)
+                and not os.isfile(sharedfile)
+                and not os.isfile(dylibfile)
+                and not os.isfile(winlibfile)
+                and not os.isfile(dllfile)) then
+            return nil
+        end
+
+        return {
+            links = {"eui_neo_core"},
+            linkdirs = {libdir},
+            includedirs = _collect_includedirs(installdir),
+            bindirs = {bindir}
+        }
     end)
 
     on_test(function (package)

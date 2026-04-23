@@ -16,16 +16,36 @@ package("papiliocharontis")
     add_deps("cmake")
 
     on_load(function (package)
+        package:set("kind", "library")
         package:add("links", "papilio")
     end)
 
     on_fetch(function (package)
-        local result = {}
-        result.links = {"papilio"}
-        result.linkdirs = package:installdir("lib")
-        result.bindirs = package:installdir("bin")
-        result.includedirs = package:installdir("include")
-        return result
+        local includedir = package:installdir("include")
+        local libdir = package:installdir("lib")
+        local bindir = package:installdir("bin")
+        local marker = path.join(includedir, "papilio", "papilio.hpp")
+        local libfile = path.join(libdir, "libpapilio.a")
+        local sharedfile = path.join(libdir, "libpapilio.so")
+        local dylibfile = path.join(libdir, "libpapilio.dylib")
+        local winlibfile = path.join(libdir, "papilio.lib")
+        local dllfile = path.join(bindir, "papilio.dll")
+
+        if not os.isfile(marker)
+            or (not os.isfile(libfile)
+                and not os.isfile(sharedfile)
+                and not os.isfile(dylibfile)
+                and not os.isfile(winlibfile)
+                and not os.isfile(dllfile)) then
+            return nil
+        end
+
+        return {
+            links = {"papilio"},
+            linkdirs = {libdir},
+            bindirs = {bindir},
+            includedirs = {includedir}
+        }
     end)
 
     on_install(function (package)
@@ -40,6 +60,20 @@ package("papiliocharontis")
             "-DBUILD_SHARED_LIBS=" .. (package:config("shared") and "ON" or "OFF"),
         }
         import("package.tools.cmake").install(package, configs)
+
+        local installdir = package:installdir()
+        local includedir = path.join(installdir, "include")
+        local libdir = path.join(installdir, "lib")
+        local bindir = path.join(installdir, "bin")
+
+        assert(os.isfile(path.join(includedir, "papilio", "papilio.hpp")),
+            "papiliocharontis package: installed headers are missing")
+        assert(os.isfile(path.join(libdir, "libpapilio.a"))
+            or os.isfile(path.join(libdir, "papilio.lib"))
+            or os.isfile(path.join(libdir, "libpapilio.so"))
+            or os.isfile(path.join(libdir, "libpapilio.dylib"))
+            or os.isfile(path.join(bindir, "papilio.dll")),
+            "papiliocharontis package: installed library artifact is missing")
     end)
 
     on_test(function (package)
