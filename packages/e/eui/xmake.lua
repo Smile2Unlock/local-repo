@@ -39,7 +39,7 @@ package("eui")
 
     on_install(function (package)
         local installdir = package:installdir()
-        local srcdir = package:sourcedir()
+        local srcdir = path.join(package:cachedir(), "source", "eui")
         local builddir = path.join(package:builddir(), "build")
         local includedir = path.join(installdir, "include")
         local eui_includedir = path.join(includedir, "eui")
@@ -66,18 +66,36 @@ package("eui")
 
         import("package.tools.cmake").install(package, configs, {builddir = builddir, sourcedir = srcdir})
 
-        if os.isfile(path.join(srcdir, "src", "EUINEO.h")) then
-            os.cp(path.join(srcdir, "src", "EUINEO.h"), eui_includedir)
-        end
-        for _, subdir in ipairs({"app", "components", "pages", "ui"}) do
-            local source_subdir = path.join(srcdir, "src", subdir)
-            if os.isdir(source_subdir) then
-                os.cp(source_subdir, eui_includedir)
+        local src_root = path.join(srcdir, "src")
+        assert(os.isdir(src_root), "eui package: missing src directory: " .. src_root)
+
+        for _, filename in ipairs({"EUINEO.h", "EUINEO.cpp"}) do
+            local filepath = path.join(src_root, filename)
+            if os.isfile(filepath) then
+                os.vcp(filepath, path.join(eui_includedir, filename))
             end
         end
-        if os.isfile(path.join(srcdir, "third_party", "stb_truetype.h")) then
-            os.cp(path.join(srcdir, "third_party", "stb_truetype.h"), eui_includedir)
+
+        for _, dirname in ipairs({"app", "components", "pages", "ui", "font"}) do
+            local dirpath = path.join(src_root, dirname)
+            if os.isdir(dirpath) then
+                os.vcp(dirpath, path.join(eui_includedir, dirname))
+            end
         end
+
+        local third_party_root = path.join(srcdir, "third_party")
+        if os.isdir(third_party_root) then
+            for _, pattern in ipairs({"*.h", "*.hpp", "*.hh", "*.hxx"}) do
+                for _, header in ipairs(os.files(path.join(third_party_root, pattern))) do
+                    os.vcp(header, path.join(eui_includedir, path.filename(header)))
+                end
+            end
+        end
+
+        assert(os.isfile(path.join(eui_includedir, "EUINEO.h")),
+            "eui package: failed to copy src headers into include/eui")
+        assert(os.isfile(path.join(eui_includedir, "app", "DslAppRuntime.h")),
+            "eui package: failed to copy src/app headers into include/eui/app")
 
         local function copy_if_exists(filepath, destdir)
             if os.isfile(filepath) then
