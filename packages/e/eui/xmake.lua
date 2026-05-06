@@ -1,37 +1,9 @@
 package("eui")
-    set_homepage("https://github.com/sudoevolve/EUI")
-    set_description("EUI core library packaged from the upstream CMake project")
+    set_homepage("https://github.com/sudoevolve/EUI-NEO")
+    set_description("EUI-NEO: a cross-platform, high-performance, low-overhead C++17 UI framework built on OpenGL and GLFW")
     set_license("MIT")
 
-    add_urls("https://github.com/sudoevolve/EUI.git")
-    add_versions("df3f9b591920535789a34426422134a3e92b23b1", "df3f9b591920535789a34426422134a3e92b23b1")
-
     add_deps("cmake")
-
-    local function _normalize_binpath(bin)
-        if not bin then
-            return nil
-        end
-        if os.isfile(bin) then
-            return path.unix(bin)
-        end
-        if is_host("windows") and os.isfile(bin .. ".exe") then
-            return path.unix(bin .. ".exe")
-        end
-        return path.unix(bin)
-    end
-
-    local function _collect_includedirs(installdir)
-        local includedirs = {}
-        local include_root = path.join(installdir, "include")
-        if os.isdir(include_root) then
-            table.insert(includedirs, include_root)
-            for _, subdir in ipairs(os.dirs(path.join(include_root, "*"))) do
-                table.insert(includedirs, subdir)
-            end
-        end
-        return includedirs
-    end
 
     on_load(function (package)
         package:add("links", "eui_neo_core")
@@ -39,103 +11,108 @@ package("eui")
 
     on_install(function (package)
         local installdir = package:installdir()
-        local srcdir = path.join(package:cachedir(), "source", "eui")
-        local builddir = path.join(package:builddir(), "build")
+        local srcdir = path.join(os.projectdir(), ".xmake", "EUI-NEO-0.3.6")
+        local builddir = path.absolute(package:builddir())
         local includedir = path.join(installdir, "include")
         local eui_includedir = path.join(includedir, "eui")
         local libdir = path.join(installdir, "lib")
-        local bindir = path.join(installdir, "bin")
+
+        assert(os.isdir(srcdir), "eui package: source directory not found at " .. srcdir)
+        assert(os.isdir(path.join(srcdir, "core")), "eui package: missing core directory in " .. srcdir)
 
         os.mkdir(includedir)
         os.mkdir(eui_includedir)
         os.mkdir(libdir)
-        os.mkdir(bindir)
 
+        -- 复制自定义 CMakeLists.txt 到源码目录覆盖原有的（原版只编译 demo，没有库目标）
+        local cmakelists = path.join(os.projectdir(), "local-repo", "packages", "e", "eui", "CMakeLists.txt")
+        assert(os.isfile(cmakelists), "eui package: missing custom CMakeLists.txt at " .. cmakelists)
+        os.vcp(cmakelists, path.join(srcdir, "CMakeLists.txt"))
+
+        -- Configure cmake
         local configs = {
-            CMAKE_BUILD_TYPE = package:is_debug() and "Debug" or "Release"
+            CMAKE_BUILD_TYPE = package:is_debug() and "Debug" or "Release",
+            CMAKE_INSTALL_PREFIX = path.unix(installdir),
+            BUILD_SHARED_LIBS = "OFF"
         }
 
-        local cc = _normalize_binpath(package:build_getenv("cc"))
-        local cxx = _normalize_binpath(package:build_getenv("cxx"))
-        if cc then
-            configs.CMAKE_C_COMPILER = cc
+        local cc = package:build_getenv("cc")
+        local cxx = package:build_getenv("cxx")
+        if cc then configs.CMAKE_C_COMPILER = cc end
+        if cxx then configs.CMAKE_CXX_COMPILER = cxx end
+
+        os.mkdir(builddir)
+        local argv = {}
+        for name, value in pairs(configs) do
+            table.insert(argv, "-D" .. name .. "=" .. value)
         end
-        if cxx then
-            configs.CMAKE_CXX_COMPILER = cxx
-        end
+        table.insert(argv, path.unix(srcdir))
+        os.vrunv("cmake", argv, {curdir = builddir})
 
-        import("package.tools.cmake").install(package, configs, {builddir = builddir, sourcedir = srcdir})
+        -- Build eui_neo_core static library
+        local njobs = tostring(os.default_njob() or 8)
+        os.vrunv("cmake", {"--build", ".", "--target", "eui_neo_core", "--config", configs.CMAKE_BUILD_TYPE, "-j", njobs}, {
+            curdir = builddir,
+            envs = {CMAKE_BUILD_PARALLEL_LEVEL = njobs}
+        })
 
-        local src_root = path.join(srcdir, "src")
-        assert(os.isdir(src_root), "eui package: missing src directory: " .. src_root)
+        -- 复制头文件：v0.3.6 没有 src/ 前缀，目录结构为 core/ components/ app/ 3rd/
+        local src_root = srcdir
+        assert(os.isdir(path.join(src_root, "core")), "eui package: missing core directory")
 
-        for _, filename in ipairs({"EUINEO.h", "EUINEO.cpp"}) do
-            local filepath = path.join(src_root, filename)
-            if os.isfile(filepath) then
-                os.vcp(filepath, path.join(eui_includedir, filename))
-            end
-        end
-
-        for _, dirname in ipairs({"app", "components", "pages", "ui", "font"}) do
+        for _, dirname in ipairs({"core", "components", "app", "3rd"}) do
             local dirpath = path.join(src_root, dirname)
             if os.isdir(dirpath) then
                 os.vcp(dirpath, path.join(eui_includedir, dirname))
             end
         end
 
-        local third_party_root = path.join(srcdir, "third_party")
-        if os.isdir(third_party_root) then
-            for _, pattern in ipairs({"*.h", "*.hpp", "*.hh", "*.hxx"}) do
-                for _, header in ipairs(os.files(path.join(third_party_root, pattern))) do
-                    os.vcp(header, path.join(eui_includedir, path.filename(header)))
+        -- 复制内置的第三方单头文件（如 stb、nanosvg）
+        local third_dir = path.join(src_root, "3rd")
+        if os.isdir(third_dir) then
+            for _, header in ipairs(os.files(path.join(third_dir, "*.h"))) do
+                os.vcp(header, path.join(eui_includedir, "3rd", path.filename(header)))
+            end
+        end
+
+        -- 验证核心头文件已复制
+        assert(os.isfile(path.join(eui_includedir, "core", "dsl.h")),
+            "eui package: failed to copy core/dsl.h into include/eui/core")
+        assert(os.isfile(path.join(eui_includedir, "components", "components.h")),
+            "eui package: failed to copy components/components.h into include/eui/components")
+
+        -- 查找构建好的静态库
+        local function find_lib(name)
+            -- 先在根目录找
+            local root_file = path.join(builddir, name)
+            if os.isfile(root_file) then
+                return root_file
+            end
+            -- 再递归查找
+            for _, filepath in ipairs(os.files(path.join(builddir, "**/" .. name))) do
+                if os.isfile(filepath) then
+                    return filepath
                 end
             end
+            return nil
         end
 
-        assert(os.isfile(path.join(eui_includedir, "EUINEO.h")),
-            "eui package: failed to copy src headers into include/eui")
-        assert(os.isfile(path.join(eui_includedir, "app", "DslAppRuntime.h")),
-            "eui package: failed to copy src/app headers into include/eui/app")
-
-        local function copy_if_exists(filepath, destdir)
-            if os.isfile(filepath) then
-                os.cp(filepath, destdir)
-                return true
-            end
-            return false
-        end
-
-        local function copy_candidates(filenames, destdir)
-            local copied = false
-            for _, filename in ipairs(filenames) do
-                copied = copy_if_exists(path.join(builddir, filename), destdir) or copied
-                for _, filepath in ipairs(os.files(path.join(builddir, "**/" .. filename))) do
-                    os.cp(filepath, destdir)
-                    copied = true
+        local libname = package:is_plat("windows") and "eui_neo_core.lib" or "libeui_neo_core.a"
+        local libfile = find_lib(libname)
+        if not libfile then
+            for _, alt in ipairs({"libeui_neo_core.a", "eui_neo_core.lib", "libeui_neo_core.so", "libeui_neo_core.dylib"}) do
+                libfile = find_lib(alt)
+                if libfile then
+                    os.cp(libfile, path.join(libdir, alt))
+                    break
                 end
             end
-            return copied
+        else
+            os.cp(libfile, path.join(libdir, libname))
         end
 
-        copy_candidates({"libeui_neo_core.a", "eui_neo_core.lib", "libeui_neo_core.so", "libeui_neo_core.dylib"}, libdir)
-        copy_candidates({"eui_neo_core.dll"}, bindir)
-
-        local found_lib = false
-        for _, candidate in ipairs({
-            path.join(libdir, "libeui_neo_core.a"),
-            path.join(libdir, "eui_neo_core.lib"),
-            path.join(libdir, "libeui_neo_core.so"),
-            path.join(libdir, "libeui_neo_core.dylib"),
-            path.join(bindir, "eui_neo_core.dll")
-        }) do
-            if os.isfile(candidate) then
-                found_lib = true
-                break
-            end
-        end
-
-        if not found_lib then
-            raise("eui package: failed to locate built eui_neo_core artifacts")
+        if not libfile then
+            raise("eui package: failed to locate built eui_neo_core library artifact in " .. builddir)
         end
     end)
 
@@ -143,28 +120,29 @@ package("eui")
         local installdir = package:installdir()
         local includedir = path.join(installdir, "include")
         local libdir = path.join(installdir, "lib")
-        local bindir = path.join(installdir, "bin")
-        local marker = path.join(includedir, "eui", "app", "DslAppRuntime.h")
+        local marker = path.join(includedir, "eui", "core", "dsl.h")
         local libfile = path.join(libdir, "libeui_neo_core.a")
         local sharedfile = path.join(libdir, "libeui_neo_core.so")
         local dylibfile = path.join(libdir, "libeui_neo_core.dylib")
         local winlibfile = path.join(libdir, "eui_neo_core.lib")
-        local dllfile = path.join(bindir, "eui_neo_core.dll")
 
         if not os.isfile(marker)
             or (not os.isfile(libfile)
                 and not os.isfile(sharedfile)
                 and not os.isfile(dylibfile)
-                and not os.isfile(winlibfile)
-                and not os.isfile(dllfile)) then
+                and not os.isfile(winlibfile)) then
             return nil
+        end
+
+        local includedirs = {includedir, path.join(includedir, "eui")}
+        if os.isdir(path.join(includedir, "eui", "3rd")) then
+            table.insert(includedirs, path.join(includedir, "eui", "3rd"))
         end
 
         return {
             links = {"eui_neo_core"},
             linkdirs = {libdir},
-            includedirs = _collect_includedirs(installdir),
-            bindirs = {bindir}
+            includedirs = includedirs,
         }
     end)
 
@@ -172,7 +150,6 @@ package("eui")
         assert(os.isfile(path.join(package:installdir("lib"), "libeui_neo_core.a"))
             or os.isfile(path.join(package:installdir("lib"), "eui_neo_core.lib"))
             or os.isfile(path.join(package:installdir("lib"), "libeui_neo_core.so"))
-            or os.isfile(path.join(package:installdir("lib"), "libeui_neo_core.dylib"))
-            or os.isfile(path.join(package:installdir("bin"), "eui_neo_core.dll")),
+            or os.isfile(path.join(package:installdir("lib"), "libeui_neo_core.dylib")),
             "eui package: installed core library artifact is missing")
     end)
