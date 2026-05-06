@@ -51,6 +51,10 @@ add_library(eui_neo_core STATIC
     core/text.cpp
 )
 
+# 匹配项目运行时的 libc++ 和 PIC 设置
+target_compile_options(eui_neo_core PRIVATE -stdlib=libc++ -fPIC)
+target_link_options(eui_neo_core PRIVATE -stdlib=libc++)
+
 target_include_directories(eui_neo_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
