@@ -92,8 +92,12 @@ package("seetaface6open")
                 configs.CMAKE_SHARED_LINKER_FLAGS = _append_flag(configs.CMAKE_SHARED_LINKER_FLAGS, openmp.shflags)
             end
         end
+        if package:is_plat("linux") then
+            configs.CMAKE_CXX_FLAGS = _append_flag(configs.CMAKE_CXX_FLAGS, "-stdlib=libc++")
+            configs.CMAKE_SHARED_LINKER_FLAGS = _append_flag(configs.CMAKE_SHARED_LINKER_FLAGS, "-stdlib=libc++")
+        end
         if package:is_plat("mingw") then
-            configs.CMAKE_CXX_FLAGS = "-Dlocaltime_r(a,b)=localtime_s(b,a)"
+            configs.CMAKE_CXX_FLAGS = _append_flag(configs.CMAKE_CXX_FLAGS, "-Dlocaltime_r(a,b)=localtime_s(b,a)")
         end
         return buildtype, platform, installdir, configs
     end
@@ -277,11 +281,14 @@ package("seetaface6open")
 
             for _, ctxmgr_lite_cpp in ipairs(os.files(path.join(srcdir, "TenniS", "**", "ctxmgr_lite.cpp"))) do
                 local content = io.readfile(ctxmgr_lite_cpp)
-                if content and content:find("#if TS_PLATFORM_CC_GCC") and not content:find("#if TS_PLATFORM_CC_GCC && !TS_PLATFORM_CC_MINGW", 1, true) then
+                if content and content:find("TS_PLATFORM_CC_GCC") then
                     content = content:gsub(
                         "#if TS_PLATFORM_CC_GCC",
-                        "#if TS_PLATFORM_CC_GCC && !TS_PLATFORM_CC_MINGW",
-                        1
+                        "#if TS_PLATFORM_CC_GCC && !TS_PLATFORM_CC_MINGW && !defined(_LIBCPP_VERSION)"
+                    )
+                    content = content:gsub(
+                        "#elif TS_PLATFORM_CC_GCC",
+                        "#elif TS_PLATFORM_CC_GCC && !defined(_LIBCPP_VERSION)"
                     )
                     io.writefile(ctxmgr_lite_cpp, content)
                     break
