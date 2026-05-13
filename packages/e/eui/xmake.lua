@@ -75,6 +75,18 @@ package("eui")
             end
         end
 
+        -- 复制字体文件到包安装目录的 assets/
+        local src_assets = path.join(src_root, "assets")
+        if os.isdir(src_assets) then
+            local dst_assets = path.join(installdir, "assets")
+            os.mkdir(dst_assets)
+            for _, ext in ipairs({"*.ttf", "*.otf"}) do
+                for _, font_file in ipairs(os.files(path.join(src_assets, ext))) do
+                    os.cp(font_file, dst_assets)
+                end
+            end
+        end
+
         -- 验证核心头文件已复制
         assert(os.isfile(path.join(eui_includedir, "core", "dsl.h")),
             "eui package: failed to copy core/dsl.h into include/eui/core")
