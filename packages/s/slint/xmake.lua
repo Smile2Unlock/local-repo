@@ -43,7 +43,7 @@ package("slint")
         return {
             links = links,
             linkdirs = {libdir},
-            includedirs = {includedir},
+            includedirs = {includedir, path.join(includedir, "slint")},
             bindirs = {bindir}
         }
     end)
