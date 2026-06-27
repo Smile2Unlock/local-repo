@@ -27,8 +27,29 @@ package("seetaface6open")
         return package:is_arch("x86", "i386") and "x86" or "x64"
     end
 
+    local function _has_core_library(package, libdir)
+        for _, link in ipairs(_package_links(package)) do
+            local candidates = {
+                path.join(libdir, "lib" .. link .. ".a"),
+                path.join(libdir, "lib" .. link .. ".so"),
+                path.join(libdir, "lib" .. link .. ".dylib"),
+                path.join(libdir, link .. ".lib")
+            }
+            if os.isfile(candidates[1])
+                or os.isfile(candidates[2])
+                or os.isfile(candidates[3])
+                or os.isfile(candidates[4]) then
+                return true
+            end
+        end
+        return false
+    end
+
     local function _package_libdir(package)
         if package:is_plat("linux") then
+            if _has_core_library(package, package:installdir("lib64")) then
+                return "lib64"
+            end
             return "lib"
         end
         return path.join("lib", _package_archdir(package))
@@ -92,7 +113,7 @@ package("seetaface6open")
                 configs.CMAKE_SHARED_LINKER_FLAGS = _append_flag(configs.CMAKE_SHARED_LINKER_FLAGS, openmp.shflags)
             end
         end
-        if package:is_plat("linux") then
+        if package:is_plat("linux") and cxx and (cxx:find("clang", 1, true) or cxx:find("clang++", 1, true)) then
             configs.CMAKE_CXX_FLAGS = _append_flag(configs.CMAKE_CXX_FLAGS, "-stdlib=libc++")
             configs.CMAKE_SHARED_LINKER_FLAGS = _append_flag(configs.CMAKE_SHARED_LINKER_FLAGS, "-stdlib=libc++")
         end
