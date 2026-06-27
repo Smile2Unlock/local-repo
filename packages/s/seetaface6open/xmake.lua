@@ -11,7 +11,9 @@ package("seetaface6open")
         "SeetaFaceAntiSpoofingX600",
         "SeetaFaceDetector600",
         "SeetaFaceLandmarker600",
-        "SeetaFaceRecognizer610"
+        "SeetaFaceRecognizer610",
+        "SeetaAuthorize",
+        "tennis"
     }
 
     local function _package_links(package)
@@ -186,7 +188,7 @@ package("seetaface6open")
         return {
             links = _package_links(package),
             linkdirs = {libdir},
-            includedirs = {includedir},
+            sysincludedirs = {includedir},
             bindirs = {bindir}
         }
     end)
