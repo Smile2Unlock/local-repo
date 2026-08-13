@@ -35,12 +35,14 @@ package("seetaface6open")
                 path.join(libdir, "lib" .. link .. ".a"),
                 path.join(libdir, "lib" .. link .. ".so"),
                 path.join(libdir, "lib" .. link .. ".dylib"),
+                path.join(libdir, "lib" .. link .. ".dll.a"),
                 path.join(libdir, link .. ".lib")
             }
             if os.isfile(candidates[1])
                 or os.isfile(candidates[2])
                 or os.isfile(candidates[3])
-                or os.isfile(candidates[4]) then
+                or os.isfile(candidates[4])
+                or os.isfile(candidates[5]) then
                 return true
             end
         end
@@ -120,7 +122,13 @@ package("seetaface6open")
             configs.CMAKE_SHARED_LINKER_FLAGS = _append_flag(configs.CMAKE_SHARED_LINKER_FLAGS, "-stdlib=libc++")
         end
         if package:is_plat("mingw") then
-            configs.CMAKE_CXX_FLAGS = _append_flag(configs.CMAKE_CXX_FLAGS, "-Dlocaltime_r(a,b)=localtime_s(b,a)")
+            -- Quoted so Ninja keeps the comma/parens inside a single argument
+            configs.CMAKE_CXX_FLAGS = _append_flag(configs.CMAKE_CXX_FLAGS, [[-D"localtime_r(a,b)=localtime_s(b,a)"]])
+            configs.CMAKE_BUILD_WITH_INSTALL_RPATH = "ON"
+            -- Manual os.vrunv("cmake") below bypasses xmake's cmake tool,
+            -- so the cross target must be declared explicitly.
+            configs.CMAKE_SYSTEM_NAME = "Windows"
+            configs.CMAKE_SYSTEM_PROCESSOR = package:is_arch("x86", "i386") and "X86" or "AMD64"
         end
         return buildtype, platform, installdir, configs
     end
@@ -132,16 +140,6 @@ package("seetaface6open")
             "Visual Studio 16 2019",
             "Visual Studio 15 2017"
         }
-    end
-
-    local function _find_mingw_make(package)
-        local mingw = package:build_getenv("mingw") or package:build_getenv("sdk")
-        if mingw then
-            local make = path.join(mingw, "bin", "mingw32-make.exe")
-            if os.isfile(make) then
-                return path.unix(make)
-            end
-        end
     end
 
     local function _build_jobs()
@@ -168,14 +166,18 @@ package("seetaface6open")
                 path.join(libdir, "lib" .. link .. ".a"),
                 path.join(libdir, "lib" .. link .. ".so"),
                 path.join(libdir, "lib" .. link .. ".dylib"),
+                path.join(libdir, "lib" .. link .. ".dll.a"),
                 path.join(libdir, link .. ".lib"),
-                path.join(bindir, link .. ".dll")
+                path.join(bindir, link .. ".dll"),
+                path.join(bindir, "lib" .. link .. ".dll")
             }
             if os.isfile(candidates[1])
                 or os.isfile(candidates[2])
                 or os.isfile(candidates[3])
                 or os.isfile(candidates[4])
-                or os.isfile(candidates[5]) then
+                or os.isfile(candidates[5])
+                or os.isfile(candidates[6])
+                or os.isfile(candidates[7]) then
                 has_any_library = true
                 break
             end
@@ -235,6 +237,34 @@ package("seetaface6open")
                     )
                     io.writefile(pot_cpp, content)
                     break
+                end
+            end
+
+            -- mingw-w64 headers on case-sensitive host filesystems ship
+            -- lowercase names; SeetaFace sources use mixed-case includes.
+            local winh_rewrites = {
+                {'#include%s*%<Windows%.h%>',        '#include <windows.h>'},
+                {'#include%s*"Windows%.h"',          '#include "windows.h"'},
+                {'#include%s*%<WinInet%.h%>',        '#include <wininet.h>'},
+                {'#include%s*"WinInet%.h"',          '#include "wininet.h"'},
+                {'#include%s*%<WinSock2%.h%>',       '#include <winsock2.h>'},
+                {'#include%s*"WinSock2%.h"',         '#include "winsock2.h"'},
+                {'#include%s*%<WinSock%.h%>',        '#include <winsock.h>'},
+                {'#include%s*"WinSock%.h"',          '#include "winsock.h"'}
+            }
+            local winh_sources = {}
+            for _, ext in ipairs({"h", "cpp"}) do
+                for _, src_file in ipairs(os.files(path.join(srcdir, "**", "*." .. ext))) do
+                    table.insert(winh_sources, src_file)
+                end
+            end
+            for _, src_file in ipairs(winh_sources) do
+                local content = io.readfile(src_file)
+                if content and content:find("#include%s*[<\"][Ww][Aa-z]*%.h[\">]") then
+                    for _, rule in ipairs(winh_rewrites) do
+                        content = content:gsub(rule[1], rule[2])
+                    end
+                    io.writefile(src_file, content)
                 end
             end
 
@@ -347,11 +377,10 @@ package("seetaface6open")
                     end
                 else
                     if package:is_plat("mingw") then
-                        local mingw_make = _find_mingw_make(package)
-                        assert(mingw_make, "mingw32-make not found, cannot configure " .. modulename .. " for mingw")
+                        -- CMake 4.x removed the MinGW Makefiles generator; Ninja is
+                        -- the portable cross-compilation choice on the host.
                         table.insert(argv, "-G")
-                        table.insert(argv, "MinGW Makefiles")
-                        table.insert(argv, cmake_define("CMAKE_MAKE_PROGRAM", mingw_make))
+                        table.insert(argv, "Ninja")
                     end
                 end
                 for name, value in pairs(configs) do

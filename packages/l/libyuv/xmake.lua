@@ -1,0 +1,97 @@
+package("libyuv")
+    set_homepage("https://chromium.googlesource.com/libyuv/libyuv/")
+    set_description("libyuv is an open source project that includes YUV scaling and conversion functionality.")
+    set_license("BSD-3-Clause")
+
+    add_urls("https://chromium.googlesource.com/libyuv/libyuv.git",
+             "https://github.com/lemenkov/libyuv.git", {alias = "git"})
+
+    -- Versions from LIBYUV_VERSION definition in include/libyuv/version.h
+    -- Pay attention to package commits incrementing this definition
+    add_versions("git:1913", "6f729fbe658a40dfd993fa8b22bd612bb17cde5c")
+    add_versions("git:1891", "611806a1559b92c97961f51c78805d8d9d528c08")
+
+    add_patches("1913", "patches/1913/cmake.patch", "9b61c6a5c26e727d164f06e83a3bf19863f840cd57fcee365429561e640930bf")
+    add_patches("1891", "patches/1891/cmake.patch", "87086566b2180f65ff3d5ef9db7c59a6e51e2592aeeb787e45305beb4cf9d30d")
+
+    add_configs("jpeg", {description = "Build with JPEG.", default = false, type = "boolean"})
+    add_configs("jpeg_library", {description = "Which JPEG library to build with.",
+                default = "libjpeg", type = "string", values = {"libjpeg", "libjpeg-turbo"}})
+    add_configs("tools", {description = "Build tools", default = false, type = "boolean"})
+
+    add_deps("cmake")
+
+    if is_plat("linux", "bsd") then
+        add_syslinks("m")
+    end
+
+    on_load(function (package)
+        if package:is_plat("mingw") then
+            -- The plain `jpeg` package does not exist in xmake-repo and has no
+            -- mingw support; libjpeg-turbo explicitly supports mingw/cross.
+            package:add("deps", "libjpeg-turbo")
+            -- libyuv.a now contains MJPEG code (HAVE_JPEG) referencing jpeg
+            -- symbols; consumers must link libjpeg-turbo too.
+            local jpegdep = package:dep("libjpeg-turbo")
+            if jpegdep then
+                local fetched = jpegdep:fetch()
+                if fetched then
+                    if fetched.links then
+                        package:add("links", fetched.links)
+                    end
+                    if fetched.linkdirs then
+                        package:add("linkdirs", fetched.linkdirs)
+                    end
+                end
+            end
+        elseif package:config("jpeg") then
+            package:add("deps", package:config("jpeg_library"))
+        end
+
+        if package:config("shared") then
+            package:add("defines", "LIBYUV_USING_SHARED_LIBRARY")
+        end
+    end)
+
+    -- Local override of the upstream xmake-repo package: upstream declares
+    -- on_install("!cross", ...) which rejects mingw cross builds from Linux.
+    -- The CMake tool provided by xmake passes the mingw toolchain through
+    -- CMAKE_SYSTEM_NAME/CMAKE_C_COMPILER etc., so cross builds work.
+    on_install(function (package)
+        if package:is_plat("iphoneos") then
+            local patch = [[set(arch_lowercase "]] .. package:arch() .. [[")]]
+            io.replace("CMakeLists.txt", [[STRING(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" arch_lowercase)]], patch, {plain = true})
+            io.replace("CMakeLists.txt", [[string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" arch_lowercase)]], patch, {plain = true})
+        end
+        -- fix linux arm64 build error
+        io.replace("CMakeLists.txt", "-march=armv9-a+sme", "", {plain = true})
+        io.replace("CMakeLists.txt", "-march=armv9-a+i8mm+sme", "", {plain = true})
+
+        local configs = {"-DCMAKE_CXX_STANDARD=14"}
+        table.insert(configs, "-DCMAKE_BUILD_TYPE=" .. (package:is_debug() and "Debug" or "Release"))
+        table.insert(configs, "-DBUILD_SHARED_LIBS=" .. (package:config("shared") and "ON" or "OFF"))
+        table.insert(configs, "-DLIBYUV_WITH_JPEG=" .. ((package:config("jpeg") or package:is_plat("mingw")) and "ON" or "OFF"))
+        table.insert(configs, "-DBUILD_TOOLS=" .. (package:config("tools") and "ON" or "OFF"))
+        if package:is_plat("mingw") then
+            -- Upstream CMakeLists passes HAVE_JPEG via
+            -- target_compile_definitions(yuv PRIVATE ...), which does not reach
+            -- the sources compiled through OBJECT libraries
+            -- ($<TARGET_OBJECTS:yuv_common_objects>). Define it globally so
+            -- convert_jpeg.cc compiles with MJPEG support.
+            local jpeg_inc = ""
+            local jpegdep = package:dep("libjpeg-turbo")
+            local fetched = jpegdep and jpegdep:fetch() or nil
+            if fetched and fetched.sysincludedirs and fetched.sysincludedirs[1] then
+                jpeg_inc = " -I" .. fetched.sysincludedirs[1]
+            elseif fetched and fetched.includedirs and fetched.includedirs[1] then
+                jpeg_inc = " -I" .. fetched.includedirs[1]
+            end
+            table.insert(configs, "-DCMAKE_C_FLAGS=-DHAVE_JPEG" .. jpeg_inc)
+            table.insert(configs, "-DCMAKE_CXX_FLAGS=-DHAVE_JPEG" .. jpeg_inc)
+        end
+        import("package.tools.cmake").install(package, configs)
+    end)
+
+    on_test(function (package)
+        assert(package:has_cfuncs("I420Rotate", {includes = "libyuv/rotate.h"}))
+    end)
