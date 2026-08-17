@@ -45,7 +45,20 @@ package("libyuv")
                 end
             end
         elseif package:config("jpeg") then
-            package:add("deps", package:config("jpeg_library"))
+            -- Propagate the JPEG library's link flags to consumers so the
+            -- static libyuv (which contains MJPEG symbols) links against the
+            -- bundled libjpeg-turbo instead of a distro libjpeg.so. Without
+            -- this, Linux consumers fall back to -ljpeg from the system.
+            local jpegdep = package:add("deps", package:config("jpeg_library"))
+            local fetched = jpegdep and jpegdep:fetch() or nil
+            if fetched then
+                if fetched.links then
+                    package:add("links", fetched.links)
+                end
+                if fetched.linkdirs then
+                    package:add("linkdirs", fetched.linkdirs)
+                end
+            end
         end
 
         if package:config("shared") then
@@ -72,12 +85,13 @@ package("libyuv")
         table.insert(configs, "-DBUILD_SHARED_LIBS=" .. (package:config("shared") and "ON" or "OFF"))
         table.insert(configs, "-DLIBYUV_WITH_JPEG=" .. ((package:config("jpeg") or package:is_plat("mingw")) and "ON" or "OFF"))
         table.insert(configs, "-DBUILD_TOOLS=" .. (package:config("tools") and "ON" or "OFF"))
-        if package:is_plat("mingw") then
+        if package:config("jpeg") or package:is_plat("mingw") then
             -- Upstream CMakeLists passes HAVE_JPEG via
             -- target_compile_definitions(yuv PRIVATE ...), which does not reach
             -- the sources compiled through OBJECT libraries
             -- ($<TARGET_OBJECTS:yuv_common_objects>). Define it globally so
-            -- convert_jpeg.cc compiles with MJPEG support.
+            -- convert_jpeg.cc compiles with MJPEG support. Applies to every
+            -- platform building with JPEG, not just mingw.
             local jpeg_inc = ""
             local jpegdep = package:dep("libjpeg-turbo")
             local fetched = jpegdep and jpegdep:fetch() or nil
