@@ -1,17 +1,24 @@
 package("seetaface6open")
     set_homepage("https://github.com/SeetaFace6Open/index")
-    set_description("SeetaFace6Open pinned source and Unicode-capable MinGW SDK")
+    set_description("SeetaFace6Open pinned source and release SDKs")
     set_license("BSD-2-Clause")
     -- Part of the package identity: old cached DLLs with ANSI model readers
     -- must not satisfy a build requesting Unicode paths.
     add_configs("unicode_paths", {description = "Use UTF-8 model paths with native Windows file I/O", default = true, type = "boolean"})
-    add_configs("prebuilt", {description = "Use the verified release MinGW x86_64 SDK", default = true, type = "boolean"})
-    add_versions("latest", "2e747eaf938f9b492f22c48d146b77015682ab4e6926613c0eb792d2ae3b8673")
+    add_configs("prebuilt", {description = "Use the verified release x86_64 SDK", default = true, type = "boolean"})
+    if is_plat("linux") then
+        add_versions("latest", "8e19ee57defccc71741f5604965bba3b1c414e47b3ca1fc8b9753d61f0dcd346")
+    else
+        add_versions("latest", "2e747eaf938f9b492f22c48d146b77015682ab4e6926613c0eb792d2ae3b8673")
+    end
 
     local function _uses_prebuilt(package)
-        return package:is_plat("mingw") and package:is_arch("x86_64")
-            and not package:is_debug() and package:config("unicode_paths")
-            and package:config("prebuilt")
+        if not package:is_arch("x86_64") or package:is_debug()
+            or not package:config("unicode_paths") or not package:config("prebuilt") then
+            return false
+        end
+        return package:is_plat("mingw")
+            or (package:is_plat("linux") and package:memcache():get("linux_sdk_compatible") == true)
     end
 
     if is_plat("linux") then
@@ -162,8 +169,29 @@ package("seetaface6open")
     end
 
     on_source(function (package)
+        if package:is_plat("linux") and package:is_arch("x86_64") and not package:is_debug()
+            and package:config("unicode_paths") and package:config("prebuilt") then
+            local compatible = try { function ()
+                local compiler, toolname = package:tool("cxx")
+                if toolname ~= "gcc" and toolname ~= "gxx" then
+                    return false
+                end
+                local glibc = os.iorunv("getconf", {"GNU_LIBC_VERSION"}):match("glibc (%d+%.%d+)")
+                if not glibc or import("core.base.semver").compare(glibc, "2.38") < 0 then
+                    return false
+                end
+                local runtime = os.iorunv(compiler, {"-print-file-name=libstdc++.so.6"}):trim()
+                local symbols = os.iorunv("objdump", {"-T", runtime})
+                return symbols:find("GLIBCXX_3.4.32", 1, true) ~= nil
+                    and symbols:find("CXXABI_1.3.8", 1, true) ~= nil
+            end }
+            package:memcache():set("linux_sdk_compatible", compatible == true)
+        end
         if _uses_prebuilt(package) then
-            package:add("urls", "https://github.com/Smile2Unlock/local-repo/releases/download/seetaface6-prebuilt-a32e2fa/seetaface6open-mingw-x86_64-a32e2fa-unicode.tar.gz")
+            local archive = package:is_plat("linux")
+                and "seetaface6open-linux-x86_64-a32e2fa.tar.gz"
+                or "seetaface6open-mingw-x86_64-a32e2fa-unicode.tar.gz"
+            package:add("urls", "https://github.com/Smile2Unlock/local-repo/releases/download/seetaface6-prebuilt-a32e2fa/" .. archive)
         end
     end)
 
@@ -224,7 +252,7 @@ package("seetaface6open")
         "linux|i386",
         function (package)
         if _uses_prebuilt(package) then
-            for _, directory in ipairs({"include", "lib", "bin", "cmake", "src"}) do
+            for _, directory in ipairs({"include", "lib", "lib64", "bin", "cmake", "src"}) do
                 if os.isdir(directory) then
                     os.cp(directory, package:installdir())
                 end
