@@ -2,6 +2,9 @@ package("seetaface6open")
     set_homepage("https://github.com/SeetaFace6Open/index")
     set_description("SeetaFace6Open built from upstream source")
     set_license("BSD-2-Clause")
+    -- Part of the package identity: old cached DLLs with ANSI model readers
+    -- must not satisfy a build requesting Unicode paths.
+    add_configs("unicode_paths", {description = "Use UTF-8 model paths with native Windows file I/O", default = true, type = "boolean"})
 
     if is_plat("linux") then
         add_deps("openmp")
@@ -350,6 +353,9 @@ package("seetaface6open")
         end
 
         local git_url = "https://github.com/SeetaFace6Open/index.git"
+        -- This is the upstream revision used by the verified Linux and MinGW
+        -- builds. Its gitlinks also pin every recursive submodule revision.
+        local git_commit = "a32e2faa0694c0f841ace4df9ead0407b78363c6"
         local srcdir = path.join(package:installdir(), "src")
         local buildroot = path.join(package:installdir(), "buildtrees")
         local _, platform, installdir, common = _build_configs(package)
@@ -420,9 +426,14 @@ package("seetaface6open")
         os.rm(buildroot)
         os.mkdir(buildroot)
 
-        os.vrunv("git", {"clone", "--recursive", git_url, srcdir})
+        os.vrunv("git", {"clone", "--no-checkout", git_url, srcdir})
+        os.vrunv("git", {"checkout", "--detach", git_commit}, {curdir = srcdir})
         os.vrunv("git", {"submodule", "update", "--init", "--recursive"}, {curdir = srcdir})
         apply_source_patches(srcdir)
+        if package:config("unicode_paths") then
+            import("patch_unicode_paths", {rootdir = package:scriptdir()})(
+                srcdir, path.join(package:scriptdir(), "utf8_path.h"))
+        end
 
         local orz_configs = table.join(common, {
             ORZ_INSTALL = "ON"
