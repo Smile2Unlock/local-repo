@@ -1,10 +1,18 @@
 package("seetaface6open")
     set_homepage("https://github.com/SeetaFace6Open/index")
-    set_description("SeetaFace6Open built from upstream source")
+    set_description("SeetaFace6Open pinned source and Unicode-capable MinGW SDK")
     set_license("BSD-2-Clause")
     -- Part of the package identity: old cached DLLs with ANSI model readers
     -- must not satisfy a build requesting Unicode paths.
     add_configs("unicode_paths", {description = "Use UTF-8 model paths with native Windows file I/O", default = true, type = "boolean"})
+    add_configs("prebuilt", {description = "Use the verified release MinGW x86_64 SDK", default = true, type = "boolean"})
+    add_versions("latest", "2e747eaf938f9b492f22c48d146b77015682ab4e6926613c0eb792d2ae3b8673")
+
+    local function _uses_prebuilt(package)
+        return package:is_plat("mingw") and package:is_arch("x86_64")
+            and not package:is_debug() and package:config("unicode_paths")
+            and package:config("prebuilt")
+    end
 
     if is_plat("linux") then
         add_deps("openmp")
@@ -153,8 +161,17 @@ package("seetaface6open")
         return jobs
     end
 
+    on_source(function (package)
+        if _uses_prebuilt(package) then
+            package:add("urls", "https://github.com/Smile2Unlock/local-repo/releases/download/seetaface6-prebuilt-a32e2fa/seetaface6open-mingw-x86_64-a32e2fa-unicode.tar.gz")
+        end
+    end)
+
     on_load(function (package)
         package:add("links", table.unpack(_package_links(package)))
+        if not _uses_prebuilt(package) then
+            package:add("deps", "cmake", "ninja")
+        end
     end)
 
     on_fetch(function (package)
@@ -206,6 +223,16 @@ package("seetaface6open")
         "linux|x86_64",
         "linux|i386",
         function (package)
+        if _uses_prebuilt(package) then
+            for _, directory in ipairs({"include", "lib", "bin", "cmake", "src"}) do
+                if os.isdir(directory) then
+                    os.cp(directory, package:installdir())
+                end
+            end
+            os.cp("LICENSE", package:installdir())
+            os.cp("PREBUILT.json", package:installdir())
+            return
+        end
         local function apply_source_patches(srcdir)
             local pot_h = path.join(srcdir, "OpenRoleZoo", "include", "orz", "mem", "pot.h")
             if os.isfile(pot_h) then

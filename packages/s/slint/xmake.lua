@@ -4,18 +4,21 @@ package("slint")
     set_license("GPL-3.0-only OR LicenseRef-Slint-Royalty-Free-2.0 OR LicenseRef-Slint-Software-3.0")
 
     if is_plat("linux") and is_arch("x86_64") then
-        add_urls("https://github.com/slint-ui/slint/releases/download/$(version)/Slint-cpp-1.17.0-Linux-x86_64.tar.gz")
-        add_versions("v1.17.0", "4de40322dee9c425d95f30f76219522a181001477d0e9c6dd2c7d72fc7894224")
+        add_urls("https://github.com/Smile2Unlock/local-repo/releases/download/slint-prebuilt-$(version)/Slint-cpp-1.18.1-Linux-x86_64.tar.gz")
+        add_versions("v1.18.1", "f0b24ea601b80afe241677d1179bf5215dceae529f2b275b678a0af9a144b255")
     elseif is_plat("mingw") and is_arch("x86_64") and is_host("linux") then
         -- mingw 交叉构建：从源码构建（host 编译器 + windows-gnu 目标运行时）
         add_urls("https://github.com/slint-ui/slint/archive/refs/tags/$(version).tar.gz")
-        add_versions("v1.17.0", "1cce5cc1e32a140e35366fe819fcf17a7b278338f67073d7bc97d4fa7a2a4d4e")
+        add_versions("v1.18.1", "fe485305ed303215e76c04918ee9aefbffbe229f18f979098ec36c7fa1dab28b")
         add_deps("cmake", "ninja")
     end
 
     on_load(function (package)
         package:set("kind", "library")
         package:add("links", "slint_cpp")
+        if package:is_plat("mingw") then
+            package:add("syslinks", "uxtheme")
+        end
     end)
 
     on_install(function (package)
@@ -30,18 +33,18 @@ package("slint")
 
         -- Host slint-compiler: runs at build time to translate .slint -> C++
         os.execv("cargo", {
-            "build", "--release", "-p", "slint-compiler",
+            "build", "--locked", "--release", "-p", "slint-compiler",
             "--target-dir", host_target_dir
-        })
+        }, {envs = {RUSTUP_TOOLCHAIN = "1.99.0"}})
 
         -- Windows runtime: staticlib consumed by mingw C++ targets.
         -- renderer-software enables SLINT_BACKEND=winit-software so the GUI can
         -- run without a GPU/OpenGL driver (e.g. inside a KVM VM).
         os.execv("cargo", {
-            "build", "--release", "--target", "x86_64-pc-windows-gnu", "-p", "slint-cpp",
+            "build", "--locked", "--release", "--target", "x86_64-pc-windows-gnu", "-p", "slint-cpp",
             "--features", "renderer-software",
             "--target-dir", win_target_dir
-        })
+        }, {envs = {RUSTUP_TOOLCHAIN = "1.99.0"}})
 
         local installdir = package:installdir()
 
@@ -127,6 +130,8 @@ package("slint")
 
         return {
             links = links,
+            -- Slint's Winit backend uses SetWindowTheme on Windows.
+            syslinks = package:is_plat("mingw") and {"uxtheme"} or {},
             linkdirs = {libdir},
             includedirs = {includedir, path.join(includedir, "slint")},
             bindirs = {bindir}
