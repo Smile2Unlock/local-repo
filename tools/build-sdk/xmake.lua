@@ -4,6 +4,8 @@ add_repositories("local-repo " .. path.join(os.scriptdir(), "..", ".."))
 
 if is_plat("mingw") then
     set_toolchains("mingw")
+elseif is_plat("linux") then
+    set_toolchains("gcc")
 end
 
 -- Rebuild the pinned SDK, including the Windows Unicode path patches.
